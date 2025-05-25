@@ -30,13 +30,13 @@ if user_skill:
     user_vector = vectorizer.transform([user_skill])
     
     # Predict cluster
-    user_cluster = fcluster(Z, 4, criterion='maxclust')  # Must match training k
+    user_cluster = fcluster(Z,t=4, criterion='maxclust')  # Must match training k
     job_vectors = vectorizer.transform(df["Skills"].fillna(""))
-    all_clusters = fcluster(Z, 4, criterion='maxclust')  # Assign clusters to jobs
+    all_clusters = fcluster(Z,t=4, criterion='maxclust')  # Assign clusters to jobs
     df["Cluster"] = all_clusters
 
     # Find similar jobs in same cluster
-    cluster_id = fcluster(Z, 4, criterion='maxclust')[0]
+    cluster_id = fcluster(Z,t=4, criterion='maxclust')[0]
     matched_jobs = df[df["Cluster"] == cluster_id]
 
     # Rank by similarity
