@@ -1,62 +1,65 @@
 import streamlit as st
 import pandas as pd
 import joblib
-from scipy.cluster.hierarchy import fcluster, linkage, dendrogram
-from sklearn.feature_extraction.text import TfidfVectorizer
-import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+from scipy.cluster.hierarchy import fcluster
+from streamlit.components.v1 import html
 
-# --- Load Data and Models ---
-@st.cache_data
-def load_data():
-    df = pd.read_csv("jobs_data.csv")  # You need to save your df as CSV
-    vectorizer = joblib.load("vectorizer.pkl")
-    Z = joblib.load("linkage_matrix.pkl")
-    return df, vectorizer, Z
+# Load job data and models
+@st.cache_data(ttl=60)
+def load_jobs():
+    return pd.read_csv("data/jobs.csv")
 
-df, vectorizer, Z = load_data()
+@st.cache_resource
+def load_models():
+    vectorizer = joblib.load("model/vectorizer.pkl")
+    linkage_matrix = joblib.load("model/linkage_matrix.pkl")
+    return vectorizer, linkage_matrix
 
-# --- Sidebar ---
-st.sidebar.title("Cluster Explorer")
-num_clusters = st.sidebar.slider("Select Number of Clusters", 2, 20, 4)
+df = load_jobs()
+vectorizer, Z = load_models()
 
-# --- Apply Clustering ---
-df['Cluster'] = fcluster(Z, num_clusters, criterion='maxclust')
+st.title("🧠 Job Recommender with Skill Clustering")
 
-# --- Title ---
-st.title("Job Clustering Dashboard")
-st.write(f"Clustering jobs into **{num_clusters}** clusters based on required skills.")
+# User input
+user_skill = st.text_input("Enter your skills (comma-separated):")
 
-# --- Show Cluster Distribution ---
-st.subheader("Cluster Distribution")
-st.bar_chart(df['Cluster'].value_counts().sort_index())
+if user_skill:
+    # Vectorize user input
+    user_vector = vectorizer.transform([user_skill])
+    
+    # Predict cluster
+    user_cluster = fcluster(Z, 4, criterion='maxclust')  # Must match training k
+    job_vectors = vectorizer.transform(df["Skills"].fillna(""))
+    all_clusters = fcluster(Z, 4, criterion='maxclust')  # Assign clusters to jobs
+    df["Cluster"] = all_clusters
 
-# --- Keyword Summary ---
-st.subheader("Top Keywords per Cluster")
-tfidf_matrix = vectorizer.transform(df['Skills']).toarray()
-feature_names = vectorizer.get_feature_names_out()
-tfidf_df = pd.DataFrame(tfidf_matrix)
-tfidf_df['Cluster'] = df['Cluster'].values
+    # Find similar jobs in same cluster
+    cluster_id = fcluster(Z, 4, criterion='maxclust', t=4)[0]
+    matched_jobs = df[df["Cluster"] == cluster_id]
 
-def get_top_keywords(cluster_id, top_n=10):
-    cluster_tfidf = tfidf_df[tfidf_df['Cluster'] == cluster_id].drop('Cluster', axis=1)
-    mean_tfidf = cluster_tfidf.mean(axis=0)
-    top_indices = mean_tfidf.argsort()[::-1][:top_n]
-    return [feature_names[i] for i in top_indices]
+    # Rank by similarity
+    similarities = cosine_similarity(user_vector, job_vectors[matched_jobs.index])
+    matched_jobs["Similarity"] = similarities[0]
+    top_matches = matched_jobs.sort_values("Similarity", ascending=False).head(10)
 
-for cluster_id in sorted(df['Cluster'].unique()):
-    st.markdown(f"**Cluster {cluster_id}**")
-    keywords = get_top_keywords(cluster_id)
-    st.write(", ".join(keywords))
-
-# --- View Jobs by Cluster ---
-st.subheader("Browse Job Titles by Cluster")
-selected_cluster = st.selectbox("Select Cluster", sorted(df['Cluster'].unique()))
-filtered = df[df['Cluster'] == selected_cluster]
-st.write(f"Found {len(filtered)} job postings in Cluster {selected_cluster}")
-st.dataframe(filtered[['Title', 'Company', 'Location', 'Skills']].reset_index(drop=True))
-
-# --- Optional: Dendrogram Plot ---
-st.subheader("Dendrogram")
-fig, ax = plt.subplots(figsize=(10, 5))
-dendrogram(Z, truncate_mode='lastp', p=num_clusters, leaf_rotation=90., leaf_font_size=10., show_contracted=True, ax=ax)
-st.pyplot(fig)
+    if not top_matches.empty:
+        st.success(f"Found {len(top_matches)} jobs in your cluster 🎯")
+        st.dataframe(top_matches[["Title", "Company", "Location", "Skills", "Similarity"]])
+        
+        # 🔔 JavaScript Notification
+        html(f"""
+            <script>
+                Notification.requestPermission().then(function(permission) {{
+                    if (permission === "granted") {{
+                        new Notification("🎯 Matched Jobs Found", {{
+                            body: "Top jobs for your skills have been found!",
+                            icon: "https://cdn-icons-png.flaticon.com/512/565/565547.png"
+                        }});
+                    }}
+                }});
+            </script>
+        """)
+    else:
+        st.warning("No job matches found.")
