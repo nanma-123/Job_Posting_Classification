@@ -13,8 +13,8 @@ def load_jobs():
 
 @st.cache_resource
 def load_models():
-    vectorizer = joblib.load("model/vectorizer.pkl")
-    linkage_matrix = joblib.load("model/linkage_matrix.pkl")
+    vectorizer = joblib.load("vectorizer.pkl")
+    linkage_matrix = joblib.load("linkage_matrix.pkl")
     return vectorizer, linkage_matrix
 
 df = load_jobs()
