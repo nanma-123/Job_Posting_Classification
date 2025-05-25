@@ -1,48 +1,47 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-import schedule
 import time
-from datetime import datetime
+import joblib
+from scipy.cluster.hierarchy import fcluster
+from sklearn.feature_extraction.text import TfidfVectorizer
+from scipy.cluster.hierarchy import linkage
 
-DATA_FILE = "jobs_data.csv"
-URL = "https://example.com/jobs"  # Replace with actual job listing page
+headers = {'User-Agent': 'Mozilla/5.0'}
+base_url = "https://www.karkidi.com/Find-Jobs/{}/all/India"
+jobs_list = []
 
-def scrape_jobs():
-    response = requests.get(URL)
-    soup = BeautifulSoup(response.text, 'html.parser')
+for page in range(1, 31):
+    url = base_url.format(page)
+    res = requests.get(url, headers=headers)
+    soup = BeautifulSoup(res.content, "html.parser")
+    job_blocks = soup.find_all("div", class_="ads-details")
 
-    jobs = []
-    for job_entry in soup.select(".job-card"):  # Update selector as needed
-        title = job_entry.select_one(".job-title").text.strip()
-        company = job_entry.select_one(".company").text.strip()
-        location = job_entry.select_one(".location").text.strip()
-        skills = job_entry.select_one(".skills").text.strip()
+    for job in job_blocks:
+        try:
+            title = job.find("h4").get_text(strip=True)
+            company = job.find("a", href=lambda x: x and "Employer-Profile" in x).get_text(strip=True)
+            location = job.find("p").get_text(strip=True)
+            skills_tag = job.find("span", string="Key Skills")
+            skills = skills_tag.find_next("p").get_text(strip=True) if skills_tag else ""
+            jobs_list.append({
+                "Title": title,
+                "Company": company,
+                "Location": location,
+                "Skills": skills
+            })
+        except:
+            continue
+    time.sleep(1)
 
-        jobs.append({
-            "Title": title,
-            "Company": company,
-            "Location": location,
-            "Skills": skills,
-            "ScrapedAt": datetime.utcnow()
-        })
+df = pd.DataFrame(jobs_list)
+df.to_csv("data/jobs.csv", index=False)
 
-    df_new = pd.DataFrame(jobs)
+# TF-IDF vectorizer & clustering
+vectorizer = TfidfVectorizer(stop_words='english')
+X = vectorizer.fit_transform(df["Skills"].fillna(""))
+Z = linkage(X.toarray(), method='ward')
 
-    # Load existing data
-    try:
-        df_old = pd.read_csv(DATA_FILE)
-    except FileNotFoundError:
-        df_old = pd.DataFrame()
-
-    # Merge and drop duplicates
-    df_combined = pd.concat([df_old, df_new]).drop_duplicates(subset=["Title", "Company", "Location", "Skills"])
-    df_combined.to_csv(DATA_FILE, index=False)
-    print(f"[{datetime.now()}] Scraped {len(df_new)} jobs. Total now: {len(df_combined)}.")
-
-schedule.every().day.at("06:00").do(scrape_jobs)
-
-if __name__ == "__main__":
-    while True:
-        schedule.run_pending()
-        time.sleep(60)
+# Save
+joblib.dump(vectorizer, "model/vectorizer.pkl")
+joblib.dump(Z, "model/linkage_matrix.pkl")
