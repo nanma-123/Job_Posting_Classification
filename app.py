@@ -36,7 +36,7 @@ if user_skill:
     df["Cluster"] = all_clusters
 
     # Find similar jobs in same cluster
-    cluster_id = fcluster(Z, 4, criterion='maxclust', t=4)[0]
+    cluster_id = fcluster(Z, 4, criterion='maxclust')[0]
     matched_jobs = df[df["Cluster"] == cluster_id]
 
     # Rank by similarity
